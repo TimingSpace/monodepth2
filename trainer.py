@@ -286,9 +286,11 @@ class Trainer:
                     elif self.opt.pose_model_type == "posecnn":
                         pose_inputs = torch.cat(pose_inputs, 1)
 
-                    axisangle, translation = self.models["pose"](pose_inputs)
+                    axisangle, translation,out_std = self.models["pose"](pose_inputs)
+                    #print(axisangle.shape,translation.shape,out_std.shape)
                     outputs[("axisangle", 0, f_i)] = axisangle
                     outputs[("translation", 0, f_i)] = translation
+                    outputs[("pad_stds",0,f_i)] = out_std
 
                     # Invert the matrix if the frame id is negative
                     outputs[("cam_T_cam", 0, f_i)] = transformation_from_parameters(
@@ -389,6 +391,11 @@ class Trainer:
                 if not self.opt.disable_automasking:
                     outputs[("color_identity", frame_id, scale)] = \
                         inputs[("color", frame_id, source_scale)]
+    def compute_patch_agreement_loss(self,outputs):
+        pad_loss = 0
+        for i, frame_id in enumerate(self.opt.frame_ids[1:]):
+            pad_loss+=torch.mean(outputs["pad_stds",0,frame_id])
+        return pad_loss
 
     def compute_reprojection_loss(self, pred, target):
         """Computes reprojection loss between a batch of predicted and target images
@@ -490,8 +497,8 @@ class Trainer:
             loss += self.opt.disparity_smoothness * smooth_loss / (2 ** scale)
             total_loss += loss
             losses["loss/{}".format(scale)] = loss
-
         total_loss /= self.num_scales
+        total_loss +=self.compute_patch_agreement_loss(outputs)
         losses["loss"] = total_loss
         return losses
 
